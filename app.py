@@ -1,3 +1,4 @@
+from flask import Flask, request, jsonify, send_file, render_template
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 import os
@@ -48,8 +49,8 @@ with app.app_context():
     db.create_all()
 
 @app.route('/')
-def hello():
-    return "Backend is running!"
+def index():
+    return render_template('index.html') 
 
 # 1. 获取所有联系人 (支持按是否收藏筛选)
 @app.route('/contacts', methods=['GET'])
