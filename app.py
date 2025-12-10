@@ -1,7 +1,9 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 import os
-
+import pandas as pd
+import io
+from flask import send_file
 app = Flask(__name__)
 
 # 配置 SQLite 数据库
@@ -99,3 +101,61 @@ def delete_contact(id):
     
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
+
+    # 5. 导出为 Excel 
+@app.route('/export', methods=['GET'])
+def export_excel():
+    contacts = Contact.query.all()
+    data_list = []
+    
+    for c in contacts:
+        methods_str = "; ".join([f"{m.type}:{m.value}" for m in c.methods])
+        data_list.append({
+            "Name": c.name,
+            "Is Favorite": "Yes" if c.is_favorite else "No",
+            "Contact Methods": methods_str
+        })
+        
+    df = pd.DataFrame(data_list)
+    
+    # 保存到内存流中，而不是存到硬盘
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Contacts')
+    output.seek(0)
+    
+    return send_file(output, download_name="contacts.xlsx", as_attachment=True)
+
+# 6. 从 Excel 导入 
+@app.route('/import', methods=['POST'])
+def import_excel():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+        
+    file = request.files['file']
+    
+    try:
+        df = pd.read_excel(file)
+        # 假设 Excel 列名是: Name, Is Favorite, Contact Methods (格式: type:value; type:value)
+        
+        for index, row in df.iterrows():
+            # 创建联系人
+            is_fav = True if row.get('Is Favorite') == 'Yes' else False
+            new_contact = Contact(name=row['Name'], is_favorite=is_fav)
+            db.session.add(new_contact)
+            
+            # 解析联系方式字符串
+            methods_raw = str(row.get('Contact Methods', ''))
+            if methods_raw and methods_raw != 'nan':
+                method_parts = methods_raw.split(';')
+                for part in method_parts:
+                    if ':' in part:
+                        m_type, m_value = part.strip().split(':', 1)
+                        new_method = ContactMethod(type=m_type, value=m_value, contact=new_contact)
+                        db.session.add(new_method)
+                        
+        db.session.commit()
+        return jsonify({"message": "Import successful"}), 201
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
